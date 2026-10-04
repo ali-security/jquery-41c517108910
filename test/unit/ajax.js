@@ -1586,10 +1586,16 @@ module( "ajax", {
 		}
 	});
 
-	testIframeWithCallback( "#14379 - jQuery.ajax() on unload", "ajax/onunload.html", function( status ) {
-		expect( 1 );
-		strictEqual( status, "success", "Request completed" );
-	});
+	// Support: Chrome 80+
+	// Chrome forbids synchronous XHR during page dismissal (unload, pagehide,
+	// beforeunload, visibilitychange), so the request below always errors there.
+	// See https://www.chromestatus.com/feature/4664843055398912
+	if ( !/chrome/i.test( navigator.userAgent ) ) {
+		testIframeWithCallback( "#14379 - jQuery.ajax() on unload", "ajax/onunload.html", function( status ) {
+			expect( 1 );
+			strictEqual( status, "success", "Request completed" );
+		});
+	}
 
 //----------- jQuery.ajaxPrefilter()
 

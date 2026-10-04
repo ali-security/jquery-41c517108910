@@ -1,0 +1,106 @@
+name: seal-build
+
+# Build-and-pack only: the test suite runs on the Travis legs (.travis.yml).
+on:
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node 0.10.48 (bundled npm 2.15.1), same runtime as the Travis leg.
+      - name: Install Node 0.10.48
+        run: |
+          set -euo pipefail
+          curl -fsSL https://nodejs.org/dist/v0.10.48/node-v0.10.48-linux-x64.tar.gz -o "$RUNNER_TEMP/node.tar.gz"
+          mkdir -p "$RUNNER_TEMP/node"
+          tar -xzf "$RUNNER_TEMP/node.tar.gz" -C "$RUNNER_TEMP/node" --strip-components=1
+          echo "$RUNNER_TEMP/node/bin" >> "$GITHUB_PATH"
+
+      - name: Show toolchain
+        run: |
+          node --version
+          npm --version
+
+      # Seal npm time machine pinned to the 1.11.1 release date so the
+      # devDependencies (grunt, uglify-js, ...) resolve as they did in 2014.
+      - name: Configure time-machine registry
+        run: npm config set registry "https://:2014-05-01T18%3A05%3A32.863Z@time-machines-npm.sealsecurity.io/"
+
+      - name: Install dependencies
+        run: npm install
+
+      # Upstream default grunt task: jsonlint, build dist/jquery.js from src/,
+      # jshint, jscs, uglify (dist/jquery.min.js + .min.map), dist, compare_size.
+      - name: Build dist from src (grunt)
+        run: ./node_modules/.bin/grunt
+
+      # Reproduces makeReleaseCopies() from build/release.js, which the jQuery
+      # release script ran after grunt to populate dist/cdn/ in the published tarball.
+      - name: Generate dist/cdn release copies
+        run: |
+          node <<'EOF'
+          var fs = require("fs");
+          var version = JSON.parse(fs.readFileSync("package.json", "utf8")).version;
+          var devFile = "dist/jquery.js";
+          var minFile = "dist/jquery.min.js";
+          var mapFile = "dist/jquery.min.map";
+          var cdnFolder = "dist/cdn";
+          var releaseFiles = {
+            "jquery-VER.js": devFile,
+            "jquery-VER.min.js": minFile,
+            "jquery-VER.min.map": mapFile,
+            "jquery.js": devFile,
+            "jquery.min.js": minFile,
+            "jquery.min.map": mapFile,
+            "jquery-latest.js": devFile,
+            "jquery-latest.min.js": minFile,
+            "jquery-latest.min.map": mapFile
+          };
+          var preRelease = /-/.test(version);
+          if (!fs.existsSync(cdnFolder)) {
+            fs.mkdirSync(cdnFolder);
+          }
+          Object.keys(releaseFiles).forEach(function (key) {
+            var text;
+            var builtFile = releaseFiles[key];
+            var unpathedFile = key.replace(/VER/g, version);
+            var releaseFile = cdnFolder + "/" + unpathedFile;
+            if (!preRelease || key.indexOf("VER") >= 0) {
+              if (/\.map$/.test(releaseFile)) {
+                text = fs.readFileSync(builtFile, "utf8")
+                  .replace(/"file":"([^"]+)","sources":\["([^"]+)"\]/,
+                    "\"file\":\"" + unpathedFile.replace(/\.min\.map/, ".min.js") +
+                    "\",\"sources\":[\"" + unpathedFile.replace(/\.min\.map/, ".js") + "\"]");
+                fs.writeFileSync(releaseFile, text);
+              } else if (/\.min\.js$/.test(releaseFile)) {
+                text = fs.readFileSync(builtFile, "utf8")
+                  .replace(/\/\/# sourceMappingURL=\S+/, "");
+                fs.writeFileSync(releaseFile, text);
+              } else {
+                fs.writeFileSync(releaseFile, fs.readFileSync(builtFile));
+              }
+              console.log("wrote " + releaseFile);
+            }
+          });
+          EOF
+          ls -l dist dist/cdn
+
+      # Packed with Node 0.10's bundled npm 2.15.1 (public tarball used npm 1.2.25;
+      # npm cannot replace itself on Node < 4).
+      # .github/ is not in upstream's .npmignore (it predates this workflow);
+      # drop it from the checkout so the tarball member set matches the release.
+      - name: Pack
+        run: |
+          rm -rf .github
+          npm pack
+          tar -tzf jquery-*.tgz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jquery-npm-tarball
+          path: jquery-*.tgz
+          if-no-files-found: error

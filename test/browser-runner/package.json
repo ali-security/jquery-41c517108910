@@ -1,0 +1,15 @@
+{
+  "name": "jquery-browser-tests",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Headless Chrome runner for the jQuery QUnit suite (CI only, not published)",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "puppeteer-core": "24.43.1"
+  },
+  "scripts": {
+    "test": "node run-browser-tests.js"
+  }
+}

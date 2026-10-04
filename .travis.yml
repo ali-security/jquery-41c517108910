@@ -1,3 +1,20 @@
 language: node_js
 node_js:
 - '0.10'
+dist: focal
+addons:
+  chrome: stable
+script:
+# Upstream build + lint on node 0.10 (grunt: build dist/jquery.js, jshint, jscs, uglify, compare_size)
+- npm test
+# Real QUnit suite in headless Chrome against the dist files built above.
+# The runner needs a modern Node; PHP (the image's phpenv PHP 8.x) serves the repo root
+# for the ajax/support fixtures.
+- nvm install 20
+- node --version && php --version && google-chrome-stable --version
+- npm install --prefix test/browser-runner --no-package-lock --no-audit --no-fund
+# 32 workers: fixtures like core/dont_return.php (sleep 30) must not starve iframe page loads
+- "PHP_CLI_SERVER_WORKERS=32 php -S 127.0.0.1:8000 -t \"$TRAVIS_BUILD_DIR\" > /tmp/php-server.log 2>&1 &"
+- node test/browser-runner/run-browser-tests.js --base-url http://127.0.0.1:8000 --variants min,dev --module-timeout 300
+after_failure:
+- tail -n 100 /tmp/php-server.log
